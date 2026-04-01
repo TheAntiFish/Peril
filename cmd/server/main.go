@@ -18,8 +18,6 @@ func main() {
 		return
 	}
 	defer conn.Close()
-	
-	fmt.Println("Connected to RabbitMQ")
 
 	ch, err := conn.Channel()
 	if err != nil {
@@ -27,6 +25,8 @@ func main() {
 		return
 	}
 	defer ch.Close()
+
+	pubsub.DeclareAndBind(conn, routing.ExchangePerilTopic, routing.GameLogSlug, routing.GameLogSlug + ".*", pubsub.Durable)
 
 	gamelogic.PrintServerHelp()
 
