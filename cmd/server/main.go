@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
 
+	"github.com/TheAntiFish/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/TheAntiFish/learn-pub-sub-starter/internal/pubsub"
 	"github.com/TheAntiFish/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -29,12 +28,37 @@ func main() {
 	}
 	defer ch.Close()
 
-	pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{IsPaused: true})
+	gamelogic.PrintServerHelp()
 
+	serverLoop:
+		for {
+			input := gamelogic.GetInput()
+
+			if len(input) == 0 {
+				continue
+			}
+
+			switch input[0] {
+			case "pause":
+				fmt.Println("Sending Pause Message")
+				pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{IsPaused: true})
+			case "resume":
+				fmt.Println("Sending Resume Message")
+				pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{IsPaused: false})
+			case "quit":
+				fmt.Println("Quitting Server")
+				break serverLoop
+			default:
+				fmt.Printf("Unknown command: %s\n", input[0])
+			}
+		}
+
+	/*
 	// wait for ctrl+c
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
 	<-signalChan
+	*/
 
 	fmt.Println("Closing Connection")
 }
