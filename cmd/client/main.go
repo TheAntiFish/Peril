@@ -19,6 +19,13 @@ func main() {
 	}
 	defer conn.Close()
 
+	ch, err := conn.Channel()
+	if err != nil {
+		fmt.Printf("Failed to open a channel: %s\n", err)
+		return
+	}
+	defer ch.Close()
+
 	userName, err := gamelogic.ClientWelcome()
 	if err != nil {
 		fmt.Printf("Failed to get client welcome: %s\n", err)
@@ -27,7 +34,16 @@ func main() {
 
 	gameState := gamelogic.NewGameState(userName)
 
-	pubsub.SubscribeJSON(conn, routing.ExchangePerilDirect, routing.PauseKey + "." + userName, routing.PauseKey, pubsub.Transient, handlerPause(gameState))
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilDirect, routing.PauseKey + "." + userName, routing.PauseKey, pubsub.Transient, handlerPause(gameState))
+	if err != nil {
+		fmt.Printf("Failed to subscribe to pause messages: %s\n", err)
+		return
+	}
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.ArmyMovesPrefix + "." + userName, routing.ArmyMovesPrefix + ".*", pubsub.Transient, handlerMove(gameState))
+	if err != nil {
+		fmt.Printf("Failed to subscribe to move messages: %s\n", err)
+		return
+	}
 
 	clientLoop:
 	for {
@@ -44,10 +60,17 @@ func main() {
 				fmt.Printf("Failed to spawn: %s\n", err)
 			}
 		case "move":
-			_, err := gameState.CommandMove(input)
+			move, err := gameState.CommandMove(input)
 			if err != nil {
 				fmt.Printf("Failed to move: %s\n", err)
+				continue
 			}
+			err = pubsub.PublishJSON(ch, routing.ExchangePerilTopic, routing.ArmyMovesPrefix + "." + userName, move)
+			if err != nil {
+				fmt.Printf("Failed to publish move: %s\n", err)
+				continue
+			}
+			fmt.Printf("Published move: %+v\n", move)
 		case "status":
 			gameState.CommandStatus()
 		case "help":
@@ -74,5 +97,12 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
 	return func(ps routing.PlayingState) {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
+	}
+}
+
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+	return func(mv gamelogic.ArmyMove) {
+		defer fmt.Print("> ")
+		gs.HandleMove(mv)
 	}
 }
