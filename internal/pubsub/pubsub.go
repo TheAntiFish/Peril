@@ -3,15 +3,23 @@ package pubsub
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type SimpleQueueType int
+type Acktype int
 
 const (
     Durable SimpleQueueType = iota // 0
     Transient                      // 1
+)
+
+const (
+	Ack Acktype = iota // 0
+	NackRequeue                // 1
+	NackDiscard                 // 2
 )
 
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
@@ -32,7 +40,7 @@ func SubscribeJSON[T any](
     queueName,
     key string,
     queueType SimpleQueueType, // an enum to represent "durable" or "transient"
-    handler func(T),
+    handler  func(T) Acktype,
 ) error {
 	ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
 	if err != nil {
@@ -55,8 +63,17 @@ func SubscribeJSON[T any](
 				continue
 			}
 
-			handler(val)
-			msg.Ack(false)
+			switch handler(val) {
+			case Ack:
+				msg.Ack(false)
+				fmt.Println("Ack Called")
+			case NackRequeue:
+				msg.Nack(false, true)
+				fmt.Println("NackRequeue Called")
+			case NackDiscard:
+				msg.Nack(false, false)
+				fmt.Println("NackDiscard Called")
+			}
 		}
 	}()
 
@@ -75,13 +92,17 @@ func DeclareAndBind(
 		return nil, amqp.Queue{}, err
 	}
 
+	table := amqp.Table{
+		"x-dead-letter-exchange": "peril_dlx",
+	}
+
 	queue, err := ch.QueueDeclare(
 		queueName,
 		queueType == Durable,
 		queueType == Transient,
 		queueType == Transient,
 		false,
-		nil,
+		table,
 	)
 	if err != nil {
 		ch.Close()
