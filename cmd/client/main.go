@@ -25,9 +25,9 @@ func main() {
 		return
 	}
 
-	pubsub.DeclareAndBind(conn, routing.ExchangePerilDirect, routing.PauseKey + "." + userName, routing.PauseKey, pubsub.Transient)
-
 	gameState := gamelogic.NewGameState(userName)
+
+	pubsub.SubscribeJSON(conn, routing.ExchangePerilDirect, routing.PauseKey + "." + userName, routing.PauseKey, pubsub.Transient, handlerPause(gameState))
 
 	clientLoop:
 	for {
@@ -68,4 +68,11 @@ func main() {
 		signal.Notify(signalChan, os.Interrupt)
 		<-signalChan
 	*/
+}
+
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+	return func(ps routing.PlayingState) {
+		defer fmt.Print("> ")
+		gs.HandlePause(ps)
+	}
 }
