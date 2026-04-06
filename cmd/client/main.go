@@ -39,9 +39,15 @@ func main() {
 		fmt.Printf("Failed to subscribe to pause messages: %s\n", err)
 		return
 	}
-	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.ArmyMovesPrefix + "." + userName, routing.ArmyMovesPrefix + ".*", pubsub.Transient, handlerMove(gameState))
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.ArmyMovesPrefix + "." + userName, routing.ArmyMovesPrefix + ".*", pubsub.Transient, handlerMove(gameState, ch))
 	if err != nil {
 		fmt.Printf("Failed to subscribe to move messages: %s\n", err)
+		return
+	}
+
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, routing.WarRecognitionsPrefix + ".*", pubsub.Durable, handlerWarRecognition(gameState))
+	if err != nil {
+		fmt.Printf("Failed to subscribe to war recognition messages: %s\n", err)
 		return
 	}
 
@@ -101,14 +107,54 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Ack
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.Acktype {
+func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyMove) pubsub.Acktype {
 	return func(mv gamelogic.ArmyMove) pubsub.Acktype {
 		defer fmt.Print("> ")
 		outcome := gs.HandleMove(mv)
 
-		if outcome == gamelogic.MoveOutComeSafe || outcome == gamelogic.MoveOutcomeMakeWar {
+		if outcome == gamelogic.MoveOutComeSafe {
 			return pubsub.Ack
 		}
+
+		if outcome == gamelogic.MoveOutcomeMakeWar {
+			err := pubsub.PublishJSON(
+				ch,
+				routing.ExchangePerilTopic,
+				routing.WarRecognitionsPrefix + "." + gs.Player.Username,
+				gamelogic.RecognitionOfWar{
+					Attacker: mv.Player,
+					Defender: gs.GetPlayerSnap(),
+			})
+			if err != nil {
+				fmt.Printf("Failed to publish war: %s\n", err)
+				return pubsub.NackRequeue
+			}
+
+			return pubsub.Ack
+		}
+		return pubsub.NackDiscard
+	}
+}
+
+func handlerWarRecognition(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
+	return func(rec gamelogic.RecognitionOfWar) pubsub.Acktype {
+		defer fmt.Print("> ")
+
+		outcome, _, _ := gs.HandleWar(rec)
+
+		if outcome == gamelogic.WarOutcomeNotInvolved{
+			return pubsub.NackRequeue
+		}
+
+		if outcome == gamelogic.WarOutcomeNoUnits {
+			return pubsub.NackDiscard
+		}
+
+		if outcome == gamelogic.WarOutcomeOpponentWon || outcome == gamelogic.WarOutcomeYouWon || outcome == gamelogic.WarOutcomeDraw {
+			return pubsub.Ack
+		}
+
+		fmt.Printf("Unknown war outcome: %d\n", outcome)
 		return pubsub.NackDiscard
 	}
 }
