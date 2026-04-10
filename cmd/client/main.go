@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/TheAntiFish/learn-pub-sub-starter/internal/gamelogic"
@@ -83,7 +84,23 @@ func main() {
 		case "help":
 			gamelogic.PrintClientHelp()
 		case "spam":
-			fmt.Println("Spamming not implemented yet!")
+			if(len(input) < 2) {
+				fmt.Println("Usage: spam <number of messages>")
+				continue
+			}
+			amount, err := strconv.Atoi(input[1])
+			if err != nil {
+				fmt.Println("number of messages must be an integer")
+				continue
+			}
+
+			for i := 0; i < amount; i++ {
+				log := gamelogic.GetMaliciousLog()
+				err := PublishGameLog(ch, userName, log)
+				if err != nil {
+					fmt.Printf("Failed to publish spam log %d: %s\n", i+1, err)
+				}
+			}
 		case "quit":
 			gamelogic.PrintQuit()
 			break clientLoop

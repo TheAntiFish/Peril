@@ -68,8 +68,8 @@ func main() {
 }
 
 func handlerLogs[T any]() func(routing.GameLog) pubsub.Acktype {
+	defer fmt.Print("> ")
 	return func(log routing.GameLog) pubsub.Acktype {
-		defer fmt.Print("> ")
 		gamelogic.WriteLog(log)
 		return pubsub.Ack
 	}
