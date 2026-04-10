@@ -26,7 +26,11 @@ func main() {
 	}
 	defer ch.Close()
 
-	pubsub.DeclareAndBind(conn, routing.ExchangePerilTopic, routing.GameLogSlug, routing.GameLogSlug + ".*", pubsub.Durable)
+	err = pubsub.SubscribeGob(conn, routing.ExchangePerilTopic, routing.GameLogSlug, routing.GameLogSlug + ".*", pubsub.Durable, handlerLogs[any]())
+	if err != nil {
+		fmt.Printf("Failed to subscribe to Gob: %s\n", err)
+		return
+	}
 
 	gamelogic.PrintServerHelp()
 
@@ -61,4 +65,12 @@ func main() {
 	*/
 
 	fmt.Println("Closing Connection")
+}
+
+func handlerLogs[T any]() func(routing.GameLog) pubsub.Acktype {
+	return func(log routing.GameLog) pubsub.Acktype {
+		defer fmt.Print("> ")
+		gamelogic.WriteLog(log)
+		return pubsub.Ack
+	}
 }

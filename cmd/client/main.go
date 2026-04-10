@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/TheAntiFish/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/TheAntiFish/learn-pub-sub-starter/internal/pubsub"
@@ -45,7 +46,7 @@ func main() {
 		return
 	}
 
-	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, routing.WarRecognitionsPrefix + ".*", pubsub.Durable, handlerWarRecognition(gameState))
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, routing.WarRecognitionsPrefix + ".*", pubsub.Durable, handlerWarRecognition(gameState, ch))
 	if err != nil {
 		fmt.Printf("Failed to subscribe to war recognition messages: %s\n", err)
 		return
@@ -136,11 +137,12 @@ func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyM
 	}
 }
 
-func handlerWarRecognition(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
+func handlerWarRecognition(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
 	return func(rec gamelogic.RecognitionOfWar) pubsub.Acktype {
 		defer fmt.Print("> ")
 
-		outcome, _, _ := gs.HandleWar(rec)
+		outcome, winner, loser := gs.HandleWar(rec)
+		logMessage := ""
 
 		if outcome == gamelogic.WarOutcomeNotInvolved{
 			return pubsub.NackRequeue
@@ -150,11 +152,33 @@ func handlerWarRecognition(gs *gamelogic.GameState) func(gamelogic.RecognitionOf
 			return pubsub.NackDiscard
 		}
 
-		if outcome == gamelogic.WarOutcomeOpponentWon || outcome == gamelogic.WarOutcomeYouWon || outcome == gamelogic.WarOutcomeDraw {
+		if outcome == gamelogic.WarOutcomeOpponentWon || outcome == gamelogic.WarOutcomeYouWon {
+			logMessage = fmt.Sprintf("%s won a war against %s.\n", winner, loser)
+		}
+
+		if outcome == gamelogic.WarOutcomeDraw {
+			logMessage = fmt.Sprintf("A war between %s and %s resulted in a draw.\n", winner, loser)
+		}
+
+		if logMessage != "" {
+			err := PublishGameLog(ch, rec.Attacker.Username, logMessage)
+			if err != nil {
+				fmt.Printf("Failed to publish game log: %s\n", err)
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		}
 
 		fmt.Printf("Unknown war outcome: %d\n", outcome)
 		return pubsub.NackDiscard
 	}
+}
+
+func PublishGameLog(ch *amqp.Channel, username string, message string) error {
+	log := routing.GameLog{
+		CurrentTime: time.Now(),
+		Message: message,
+		Username: username,
+	}
+	return pubsub.PublishGob(ch, routing.ExchangePerilTopic, routing.GameLogSlug + "." + log.Username, log)
 }
